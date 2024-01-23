@@ -1,3 +1,15 @@
+---
+title: "clustering"
+author: "Sam Goodson"
+date: "2024-01-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
 library(tidyverse)
 library(sf)
 library(janitor)
@@ -6,8 +18,10 @@ library(tidycensus)
 library(stringr)
 library(leaflet)
 library(shiny)
-library(here)
+```
 
+
+```{r}
 #Read Open Data 
 pb_survey <- read.csv('data/raw/Participatory_Budgeting_Survey_Data.csv')
 pb_projects <- read.csv('data/raw/Participatory_Budgeting_Projects.csv')
@@ -15,19 +29,16 @@ cc_membership <- read.csv('data/raw/NYC_City_Council_Committee_Membership.csv')
 cc_con_services <- read.csv('data/raw/NYC_Council_Constituent_Services.csv')
 nypd_arrest <- read_csv("data/raw/NYPD_Arrest_Data__Year_to_Date_.csv")
 ed_pres <- read.csv('data/raw/ed_pres.csv', colClasses = c("character", "character"))
-hud_ny <- read.csv("C:/Users/samtg/github/comparative_cities/hud_ny.csv")
-fihe <- read.csv("C:/Users/samtg/github/comparative_cities/fihe.csv")
 
 #Read Shapefiles
 cc_map <- read_sf('data/shapefiles/city_council')
 nyc_map <- read_sf('data/shapefiles/NYCShapefile/nyct2020_22b')
 ed_map <- read_sf('data/shapefiles/ed')
-puma <- read_sf('data/shapefiles/puma')
-census_tracts <- read_sf('data/shapefiles/census_tracts')
-pre_redis <- read_sf('data/shapefiles/pre_redis_cc')
 
-#Read ACS
+```
 
+
+```{r}
 fetch_and_pivot_data <- function(counties, table) {
   data <- get_acs(
     geography = "tract",
@@ -53,6 +64,10 @@ for (table in tables_to_fetch) {
   }
 }
 
+```
+
+
+```{r}
 acs<-joined_data%>%
   rename('white' = estimate_B02001_002, 'black' = estimate_B02001_003, 
   'am_ind' = estimate_B02001_004,
@@ -80,7 +95,10 @@ separate(NAME,c('Tract','County','State'), sep = ",")
 
 acs<-acs%>%
 rename('total_pop' = estimate_B03002_001)
+```
 
+
+```{r}
 acs<-acs%>%
   mutate(perc_white = round((whiteNH/total_pop)*100),
          perc_hisp = round((hispanic/total_pop)*100),
@@ -101,7 +119,10 @@ acs<-acs%>%
                       (estimate_B08303_010*44) + (estimate_B08303_011*59) + 
                       (estimate_B08303_012 * 89) + 
                       (estimate_B08303_013*110))/(estimate_B08301_001+1))
+```
 
+
+```{r}
 # Join acs with shapefile
 acs_map <- left_join(nyc_map, acs)
 
@@ -117,16 +138,18 @@ acs_cc_map <- acs_cc_map %>%
 
 acs_cc_map$CDTA2020 <- str_remove_all(acs_cc_map$CDTA2020, "[^0-9]")
 acs_cc_map$CDTA2020 <- as.numeric(acs_cc_map$CDTA2020)
+```
 
-# Find cases in acs_cc_map in which CounDist is not equal to CDTA2020
-acs_cc_map %>% filter(CounDist != CDTA2020) %>% select(CounDist, CDTA2020, CDTANAME) %>% print(n = 25)
+```{r}
+# Convert nypd datat to sf object and join
+nypd_arrest_sf <- st_as_sf(nypd_arrest, coords = c("Longitude", "Latitude"), crs = 4326)
 
-acs_cc_map <- acs_cc_map %>%
-  st_drop_geometry() %>%
-  select(CounDist,Tract,perc_bus,perc_subway,perc_white,perc_black,avg_com,mhi)
+# Transform nypd_arrest_sf to match CRS of acs_cc_map
+nypd_arrest_sf_transformed <- st_transform(nypd_arrest_sf, crs = st_crs(acs_cc_map))
+```
 
 
-# roll up data by council district
+```{r}
 acs_cc_map <- acs_cc_map %>%
   select(- c(Tract))%>%
   group_by(CounDist) %>%
@@ -136,28 +159,19 @@ acs_cc_map <- acs_cc_map %>%
             perc_black = mean(perc_black, na.rm = TRUE),
             avg_com = mean(avg_com, na.rm = TRUE),
             mhi = mean(mhi, na.rm = TRUE))
-
-# Convert nypd datat to sf object and join
-nypd_arrest_sf <- st_as_sf(nypd_arrest, coords = c("Longitude", "Latitude"), crs = 4326)
-
-# Transform nypd_arrest_sf to match CRS of acs_cc_map
-nypd_arrest_sf_transformed <- st_transform(nypd_arrest_sf, crs = st_crs(acs_cc_map))
+```
 
 
-# Join acs_cc_map with nypd_arrest_sf_transformed
+```{r}
 acs_cc_map_arrest <- st_join(acs_cc_map, nypd_arrest_sf_transformed, join = st_contains)
 
 
 acs_cc_map_arrest <- acs_cc_map_arrest %>%
 select(CounDist,OFNS_DESC)
+```
 
 
-acs_cc_map_arrest %>%
-tabyl(OFNS_DESC)%>%
-adorn_pct_formatting()
-
-# Make variable for violent crime
-
+```{r}
 acs_cc_map_arrest <- acs_cc_map_arrest %>%
 mutate('violent' = if_else(OFNS_DESC %in% c('ASSAULT 3 & RELATED OFFENSES','DANGEROUS WEAPONS',
 'FELONY ASSAULT','FELONY SEX CRIMES','HOMICIDE-NEGLIGENT,UNCLASSIFIE','KIDNAPPING & RELATED OFFENSES','KIDNAPPING',
@@ -167,47 +181,44 @@ crime <- acs_cc_map_arrest %>%
   st_drop_geometry()%>%
   group_by(CounDist)%>%
   summarise(v_crime = sum(violent))
+```
 
-acs_cc_map
-
-# Join acs_cc_map with crime
+```{r}
 acs_crime <- left_join(acs_cc_map,crime)
+```
 
-# Format cc dist 
+
+```{r}
+cc_con_services <- cc_con_services%>%
+  filter(COUNCIL_DIST > 51)
+```
+
+```{r}
 cc_con_services$COUNCIL_DIST <- str_remove_all(cc_con_services$COUNCIL_DIST, "[^0-9]")
 cc_con_services$COUNCIL_DIST <- as.numeric(cc_con_services$COUNCIL_DIST)
 
-head(cc_con_services)
 con_serv <- cc_con_services %>%
   select('CounDist' = COUNCIL_DIST, COMPLAINT_TYPE, DESCRIPTOR)
+```
 
-con_serv %>% tabyl(COMPLAINT_TYPE)%>% arrange(desc(n))
-
-cc_con_services <- cc_con_services%>%
-  filter(COUNCIL_DIST > 51)
-
-cc_con_services%>%
-  tabyl(COUNCIL_DIST)
+```{r}
 perc_im_con <- con_serv %>% 
   filter(!is.na(COMPLAINT_TYPE) & COMPLAINT_TYPE != "") %>% 
   group_by(CounDist, COMPLAINT_TYPE) %>% 
   summarise(n = n()) %>% 
   ungroup() %>% 
-  tabyl(CounDist)
   pivot_wider(names_from = COMPLAINT_TYPE, values_from = n) %>% 
   mutate(total = rowSums(across(where(is.numeric)), na.rm = TRUE), perc_immigration = ((Immigration/total)*100))%>%
   select(CounDist,perc_immigration)
+```
 
-cluster_join <- left_join(acs_crime,perc_im_con)
-
+```{r}
 perc_im_con$CounDist <- as.integer(perc_im_con$CounDist)
 
-cluster_join
+cluster_join <- left_join(acs_crime,perc_im_con)
+```
 
-# Clean and join ed data 
-
-head(ed_map)
-head(ed_pres)
+```{r}
 ed_pres$ElectDist <- paste0(ed_pres$AD,ed_pres$ED)
 
 ed_pres <- ed_pres %>% 
@@ -218,14 +229,12 @@ ed_pres <- ed_pres %>%
          total = `Public Counter` + `Absentee / Military` + Affidavit,
          perc_trump = (`Donald J. Trump / Michael R. Pence (Conservative)`/total)*100) 
 
-ed_pres %>%
-  tabyl(perc_trump)
-
 ed_pres$ElectDist <- as.numeric(ed_pres$ElectDist)
 
 ed_map_join <- left_join(ed_map,ed_pres)
+```
 
-# join ed_map_join with cluster_join
+```{r}
 ed_rollup <- st_join(cc_map,ed_map_join, join = st_contains)
 
 ed_rollup <- ed_rollup%>%
@@ -236,8 +245,9 @@ ed_rollup <- ed_rollup%>%
   arrange(desc(trump))
 
 cluster_join <- left_join(acs_crime,ed_rollup)
-colnames(cluster_join)
-# Use kmeans to cluster
+```
+
+```{r}
 cluster <- cluster_join %>%
   st_drop_geometry()%>%
   select(-CounDist)%>%
@@ -245,8 +255,9 @@ cluster <- cluster_join %>%
   scale()%>%
   as.data.frame()%>%
   kmeans(centers = 5)
+```
 
-# add cluster to cluster_join
+```{r}
 cluster_join<-cluster_join%>%
   drop_na()
 cluster_join$cluster <- cluster$cluster
@@ -257,68 +268,13 @@ cluster_join <- cluster_join%>%
   select(-geometry)
 
 cluster_join_map <- left_join(cc_map,cluster_join)
+```
 
-# make map with sf and ggplot 
+```{r}
 ggplot() +
   geom_sf(data = cluster_join_map, aes(fill = as.factor(cluster))) +
   scale_fill_viridis_d(option = "plasma", name = "Cluster") +
   theme_void() +
   theme(legend.position = "bottom")
-
-ggplot() +
-  geom_sf(data = cluster_join, aes(geometry = geometry, fill = as.factor(cluster))) +
-  scale_fill_viridis_d(option = "plasma", name = "Cluster") +
-  theme_void() +
-  theme(legend.position = "bottom")
-
-
-# Make map with leaflet
-cluster_join_map %>%
-  leaflet() %>%
-  addProviderTiles("CartoDB.Positron") %>%
-  addPolygons(fillColor = ~colorFactor(palette = "viridis", domain = cluster_join_map$cluster)(cluster_join_map$cluster),
-              fillOpacity = 0.8,
-              color = "white",
-              weight = 1,
-              label = ~as.character(cluster_join_map$cluster),
-              labelOptions = labelOptions(noHide = T, style = list("font-weight" = "normal", padding = "3px 8px"),
-                                          textsize = "15px", direction = "auto")) %>%
-  addLegend(pal = colorFactor(palette = "viridis", domain = cluster_join_map$cluster),
-            values = ~cluster_join_map$cluster,
-            title = "Cluster",
-            position = "bottomright")
-
-
-ny_fih <- fihe%>%
-  filter(state.code..fips. == 36)
-puma$puma <- as.integer(puma$puma)
-hud_ny<- hud_ny%>%
-  #select(-GEOID)%>%
-  rename('GEOID'= 'geoid')
-hud_ny$ct_2010 <- hud_ny$geoid
-hud_ny$geoid <- as.character(hud_ny$geoid)
-hud_ny <- impute_2010_2020_tracts_areal(hud_ny,"geoid")
-
-hud_map <- left_join(census_tracts,hud_ny, by = "GEOID")
-
-ny_fih$PUMA <- as.character(ny_fih$puma)
-hud_map <- left_join(hud_map,ny_fih,by='PUMA')
-
-tracts <- hud_map%>%
-  select(GEOID,Shape_Leng,Shape_Area,geometry)
-map_master <- st_join(cc_map,tracts,join = st_contains)
-map_master<-map_master %>%
-  st_drop_geometry()%>%
-  select(CounDist,GEOID)
-
-hud_map <- left_join(hud_map,map_master)
-head(hud_map)
-
-
-
-hud_map %>%
-  group_by(CountDist) %>%
-  summarise(across(starting_column_name:last_column_name, mean, na.rm = TRUE))
-
-
+```
 
